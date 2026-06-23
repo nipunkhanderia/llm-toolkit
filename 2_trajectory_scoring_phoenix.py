@@ -1,20 +1,35 @@
 """
 Project 2: Trajectory Scoring (using Arize Phoenix)
 -----------------------------------------------------
-Tools: arize-phoenix (OpenTelemetry-based LLM tracing)
-Records every agent step as a span and visualises the trajectory.
+Tools: openinference (OpenTelemetry-based LLM tracing) + Phoenix UI
+
+HOW TO RUN:
+1. Start Phoenix server first (pick one):
+   Option A: pip install arize-phoenix && python -m phoenix.server.main serve
+   Option B: docker run -p 6006:6006 arizephoenix/phoenix:latest
+
+2. Then run this script:
+   python 2_trajectory_scoring_phoenix.py
+
+3. Open http://localhost:6006 to see traced trajectory
 """
 
-import phoenix as px
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from openinference.instrumentation.langchain import LangChainInstrumentor
-from phoenix.otel import register
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
-# Launch Phoenix tracing (opens UI at http://localhost:6006)
-px.launch_app()
-tracer_provider = register()
-LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+# Send traces to Phoenix running at localhost:6006
+endpoint = "http://localhost:6006/v1/traces"
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+trace.set_tracer_provider(provider)
+
+# Instrument LangChain — auto-captures every LLM call as a span
+LangChainInstrumentor().instrument(tracer_provider=provider)
 
 llm = ChatOllama(model="llama3.2", temperature=0)
 
@@ -24,23 +39,22 @@ def agent_step(step_name, prompt_text):
     prompt = ChatPromptTemplate.from_messages([("user", "{input}")])
     chain = prompt | llm
     result = chain.invoke({"input": prompt_text})
-    print(f"  Step: {step_name} → {result.content[:80]}...")
+    print(f"  ✓ {step_name}: {result.content[:80]}...")
     return result.content
 
 
 if __name__ == "__main__":
     task = "Book a flight from NYC to London"
-    print(f"Task: {task}\n")
-    print("Running agent steps (each traced in Phoenix)...\n")
+    print(f"Task: {task}")
+    print("=" * 60)
+    print("Running agent steps (traced to Phoenix at localhost:6006)...\n")
 
-    # Simulate agent trajectory — each step becomes a traced span
     agent_step("search_flights", f"List 3 flights from NYC to London with prices. Task: {task}")
-    agent_step("select_flight", "Select the cheapest flight from the options: Flight A $400, Flight B $350, Flight C $500")
+    agent_step("select_flight", "Select the cheapest flight from: Flight A $400, Flight B $350, Flight C $500")
     agent_step("enter_details", "Fill passenger details: name John Doe, passport XX123456")
     agent_step("payment", "Process payment of $350 for Flight B using credit card ending 4242")
     agent_step("confirm", "Confirm booking for Flight B, NYC to London, passenger John Doe")
 
-    print("\n✅ All steps traced!")
-    print("📊 Open Phoenix UI at http://localhost:6006 to view the full trajectory")
-    print("   You'll see each step as a span with latency, input/output, and token counts")
-    input("\nPress Enter to exit...")
+    print("\n" + "=" * 60)
+    print("✅ All steps traced!")
+    print("📊 Open http://localhost:6006 to view the full trajectory tree")
