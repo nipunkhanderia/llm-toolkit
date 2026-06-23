@@ -1,0 +1,10 @@
+langchain-ollama
+langchain
+ollama
+litellm
+pytest
+deepeval
+arize-phoenix
+openinference-instrumentation-langchain
+ragas
+datasets
